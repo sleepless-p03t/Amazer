@@ -1,0 +1,1020 @@
+#!/bin/ruby
+
+require 'io/console'
+
+load('./internals.rb')
+load('./portals.rb')
+
+trap("INT", "SIG_IGN")
+
+class Maze								# Maze Generator from: https://rosettacode.org/wiki/Maze_generation#Ruby
+	DIRECTIONS = [ [1, 0], [-1, 0], [0, 1], [0, -1] ]
+ 
+	def initialize(width, height)
+		@width = width
+		@height = height
+		@start_x = rand(width)
+		@start_y = 0
+		@end_x = rand(width)
+		@end_y = height - 1
+ 
+		@vertical_walls = Array.new(width) { Array.new(height, true) }
+		@horizontal_walls = Array.new(width) { Array.new(height, true) }
+		@path = Array.new(width) { Array.new(height) }
+ 
+		@horizontal_walls[@end_x][@end_y] = false
+ 
+		generate
+	end
+ 
+	def print
+		mz = File.new(".maze", "w")
+		mz.puts @width.times.inject("+") {|str, x| str << (x == @start_x ? "   +" : "---+")}
+ 
+		@height.times do |y|
+			line = @width.times.inject("|") do |str, x|
+				str << (@path[x][y] ? " * " : "   ") << (@vertical_walls[x][y] ? "|" : " ")
+			end
+			mz.puts line
+			mz.puts @width.times.inject("+") {|str, x| str << (@horizontal_walls[x][y] ? "---+" : "   +")}
+		end
+		mz.close
+	end
+ 
+	private
+ 
+	def reset_visiting_state
+		@visited = Array.new(@width) { Array.new(@height) }
+	end
+ 
+	def move_valid?(x, y)
+		(0...@width).cover?(x) && (0...@height).cover?(y) && !@visited[x][y]
+	end
+  
+	def generate
+		reset_visiting_state
+		generate_visit_cell(@start_x, @start_y)
+	end
+ 
+	def generate_visit_cell(x, y)
+		@visited[x][y] = true
+ 
+		coordinates = DIRECTIONS.shuffle.map { |dx, dy| [x + dx, y + dy] }
+ 
+		for new_x, new_y in coordinates
+			next unless move_valid?(new_x, new_y)
+ 
+			connect_cells(x, y, new_x, new_y)
+			generate_visit_cell(new_x, new_y)
+		end
+	end
+ 
+	def connect_cells(x1, y1, x2, y2)
+		if x1 == x2
+			@horizontal_walls[x1][ [y1, y2].min ] = false
+		else
+			@vertical_walls[ [x1, x2].min ][y1] = false
+		end
+	end
+end
+
+class Game
+	
+	def initialize
+		width = (`tput cols`.to_i) / 5
+		height = (`tput lines`.to_i / 2) - 1
+
+		maze = Maze.new(width, height)
+		maze.print
+
+		board = File.readlines('.maze').join(",").gsub(",", "").split("\n")
+		@maze_board = []
+		board.each do |line|
+			@maze_board.push line.split(//)
+		end
+		File.delete('.maze')
+		@char = 'x'
+		@chrcolor = "default"
+		
+		@show_path = false
+		@path_color = "default"
+		@path_char = "\u2219".encode("UTF-8")
+
+		@portals = false
+		@portal_instance = nil
+
+		@cr = 1
+		@cc = 0
+
+		i = 1
+		n = 0
+		@maze_board[0].each do |c|
+			if c == " "
+				@cc = i
+				@maze_board[0][n] = ':'
+				@maze_board[0][n + 1] = ':'
+				@maze_board[0][n + 2] = ':'
+				break
+			end
+			i += 1
+			n += 1
+		end
+		
+		@finished = false
+		i = 0
+		@maze_board[@maze_board.length - 1].each do |c|
+			if c == " "
+				@maze_board[@maze_board.length - 1][i] = '#'
+				@maze_board[@maze_board.length - 1][i + 1] = '#'
+				@maze_board[@maze_board.length - 1][i + 2] = '#'
+				break
+			end
+			i += 1
+		end
+	end
+
+	def get_maze_board
+		return @maze_board
+	end
+
+	def get_cr
+		return @cr
+	end
+
+	def get_cc
+		return @cc
+	end
+
+	def is_finished?
+		return @finished
+	end
+
+	def set_char(c)
+		@char = c
+	end
+
+	def get_char
+		return @char
+	end
+
+	# set show_path
+	def set_show_path(bool)
+		@show_path = bool
+	end
+
+	def set_path_color(color)
+		@path_color = color
+	end
+
+	def set_char_color(color)
+		@chrcolor = color
+	end
+
+	def get_char_color
+		return @chrcolor
+	end
+
+	def set_portals(bool)
+		@portals = bool
+	end
+
+	def set_portal_instance(portal)
+		@portal_instance = portal
+	end
+
+	def move_up(y, x)
+		if test_move_up(y, x) == 1
+			if @portals
+				if @portal_instance.test_portal_up(y, x) == 0
+					npos = @portal_instance.teleport(y - 1, x)
+					@cr = npos[0]
+					@cc = npos[1]
+					clsp(y, x)
+					output_char
+					return
+				end
+			end
+			@cr -= 1
+			clsp(y, x)
+			output_char
+		end
+	end
+
+	def move_down(y, x)
+		if test_move_down(y, x) == 1
+			if @portals
+				if @portal_instance.test_portal_down(y, x) == 0
+					npos = @portal_instance.teleport(y + 1, x)
+					@cr = npos[0]
+					@cc = npos[1]
+					clsp(y, x)
+					output_char
+					return
+				end
+			end
+			@cr += 1
+			clsp(y, x)
+			output_char
+		end
+	end
+
+	def move_left(y, x)
+		if test_move_left(y, x) == 1
+			if @portals
+				if @portal_instance.test_portal_left(y, x) == 0
+					npos = @portal_instance.teleport(y, x - 1)
+					@cr = npos[0]
+					@cc = npos[1]
+					clsp(y, x)
+					output_char
+					return
+				end
+			end
+			@cc -= 1
+			clsp(y, x)
+			output_char
+		end
+	end
+
+	def move_right(y, x)
+		if test_move_right(y, x) == 1
+			if @portals
+				if @portal_instance.test_portal_right(y, x) == 0
+					npos = @portal_instance.teleport(y, x + 1)
+					@cr = npos[0]
+					@cc = npos[1]
+					clsp(y, x)
+					output_char
+					return
+				end
+			end
+			@cc += 1
+			clsp(y, x)
+			output_char
+		end
+	end
+	
+	private
+
+	def clsp(y, x)
+		system("tput cup #{y} #{x}")
+		system("tput ech 1")
+		if @show_path
+			if @path_color == "default"
+				print @path_char
+			elsif @path_color == "lg" || @path_color == "light_green"
+				print "\e[1;32m#{@path_char}\e[0m"
+			elsif @path_color == "lr" || @path_color == "light_red"
+				print "\e[1;31m#{@path_char}\e[0m"
+			elsif @path_color == "ly" || @path_color == "light_yellow"
+				print "\e[1;33m#{@path_char}\e[0m"
+			elsif @path_color == "lb" || @path_color == "light_blue"
+				print "\e[1;34m#{@path_char}\e[0m"
+			elsif @path_color == "lp" || @path_color == "light_purple"
+				print "\e[1;35m#{@path_char}\e[0m"
+			elsif @path_color == "lc" || @path_color == "light_cyan"
+				print "\e[1;36m#{@path_char}\e[0m"
+			elsif @path_color == "lw" || @path_color == "light_white"
+				print "\e[1;37m#{@path_char}\e[0m"
+			end
+		end
+	end
+
+	def output_char
+		system("tput cup #{@cr} #{@cc}")
+		if @chrcolor == "default"
+			print @char
+		elsif @chrcolor == "lg" || @chrcolor == "light_green"
+			print "\e[1;32m#{@char}\e[0m"
+		elsif @chrcolor == "lr" || @chrcolor == "light_red"
+			print "\e[1;31m#{@char}\e[0m"
+		elsif @chrcolor == "ly" || @chrcolor == "light_yellow"
+			print "\e[1;33m#{@char}\e[0m"
+		elsif @chrcolor == "lb" || @chrcolor == "light_blue"
+			print "\e[1;34m#{@char}\e[0m"
+		elsif @chrcolor == "lp" || @chrcolor == "light_purple"
+			print "\e[1;35m#{@char}\e[0m"
+		elsif @chrcolor == "lc" || @chrcolor == "light_cyan"
+			print "\e[1;36m#{@char}\e[0m"
+		elsif @chrcolor == "lw" || @chrcolor == "light_white"
+			print "\e[1;37m#{@char}\e[0m"
+		end
+	end
+	
+	def test_move_up(y, x)
+		dy = y - 1
+		dx1 = x - 1
+		dx2 = x + 1
+		if dy == 0 || @maze_board[dy][x] != " "
+			return 0
+		else
+			if @maze_board[dy][dx1] != " " || @maze_board[dy][dx2] != " "
+				return 0
+			end
+
+			return 1
+		end
+	end
+	
+	def test_move_down(y, x)
+		dy = y + 1
+		dx1 = x - 1
+		dx2 = x + 1
+		if @maze_board[dy][x] == '#'
+			@finished = true
+			return 0
+		end
+
+		if dy == @maze_board.length - 1 || @maze_board[dy][x] != " "
+			return 0
+		else
+			if @maze_board[dy][dx1] != " " || @maze_board[dy][dx2] != " "
+				return 0
+			end
+
+			return 1
+		end
+	end
+
+	def test_move_left(y, x)
+		dx = x - 2
+		if dx == 0 || @maze_board[y][dx] != " "
+			return 0
+		else
+			return 1
+		end
+	end
+
+	def test_move_right(y, x)
+		dx = x + 2
+		if dx == @maze_board[0].length - 1 || @maze_board[y][dx] != " "
+			return 0
+		else
+			return 1
+		end
+	end
+end
+
+class Runner
+	
+	def initialize(configs)
+		@game = Game.new
+		@maze = @game.get_maze_board
+		@mz_color = "default"
+		@flag_color = "default"
+		@mz_solid = false
+		@portals = false
+		@portal_instance = nil
+		@banner = [
+			["#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#"],
+			["#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#"], 
+			["#", "#", "Y", "b", "#", "#", "d", "P", "#", "#", "d", "P", "\"", "Y", "b", "#", "#", "8", "8", "#", "#", "#", "8", "8", "#", "#", "#", "#", "Y", "b", "#", "#", "#", "#", "#", "#", "#", "#", "d", "P", "#", "#", "d", "P", "\"", "Y", "b", "#", "#", "8", "8", "b", "#", "8", "8", "#", "#"],
+			["#", "#", "#", "Y", "b", "d", "P", "#", "#", "d", "P", "#", "#", "#", "Y", "b", "#", "8", "8", "#", "#", "#", "8", "8", "#", "#", "#", "#", "#", "Y", "b", "#", "#", "d", "b", "#", "#", "d", "P", "#", "#", "d", "P", "#", "#", "#", "Y", "b", "#", "8", "8", "Y", "b", "8", "8", "#", "#"], 
+			["#", "#", "#", "#", "8", "P", "#", "#", "#", "Y", "b", "#", "#", "#", "d", "P", "#", "Y", "8", "#", "#", "#", "8", "P", "#", "#", "#", "#", "#", "#", "Y", "b", "d", "P", "Y", "b", "d", "P", "#", "#", "#", "Y", "b", "#", "#", "#", "d", "P", "#", "8", "8", "#", "Y", "8", "8", "#", "#"], 
+			["#", "#", "#", "d", "P", "#", "#", "#", "#", "#", "Y", "b", "o", "d", "P", "#", "#", "`", "Y", "b", "o", "d", "P", "'", "#", "#", "#", "#", "#", "#", "#", "Y", "P", "#", "#", "Y", "P", "#", "#", "#", "#", "#", "Y", "b", "o", "d", "P", "#", "#", "8", "8", "#", "#", "Y", "8", "#", "#"], 
+			["#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#"], 
+			["#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#"]
+		]
+
+		@banner_show = true
+
+		if configs
+			load_configs
+		end
+	end
+
+	def start
+		print `printf '\033c'`
+		system("tput cup 0 0")
+		system("tput civis")
+		system("stty -echo")
+		output_maze
+		cr = @game.get_cr
+		cc = @game.get_cc
+
+		system("tput cup #{cr} #{cc}") 
+		
+		chr = @game.get_char
+		chr_color = @game.get_char_color
+		if chr_color == "default"
+			print chr
+		elsif chr_color == "lr" || chr_color == "light_red"
+			print("\e[1;31m#{chr}\e[0m")
+		elsif chr_color == "lg" || chr_color == "light_green"
+			print("\e[1;32m#{chr}\e[0m")
+		elsif chr_color == "ly" || chr_color == "light_yellow"
+			print("\e[1;33m#{chr}\e[0m")
+		elsif chr_color == "lb" || chr_color == "light_blue"
+			print("\e[1;34m#{chr}\e[0m")
+		elsif chr_color == "lp" || chr_color == "light_purple"
+			print("\e[1;35m#{chr}\e[0m")
+		elsif chr_color == "lc" || chr_color == "light_cyan"
+			print("\e[1;36m#{chr}\e[0m")
+		elsif chr_color == "lw" || chr_color == "light_white"
+			print("\e[1;37m#{chr}\e[0m")
+		end
+		
+		keep_playing = 1
+
+		while keep_playing == 1
+			cr = @game.get_cr
+			cc = @game.get_cc
+			c = Handler.read_char
+			
+			case c
+			when Handler.UP_ARROW
+				@game.move_up(cr, cc)
+			when Handler.DOWN_ARROW
+				@game.move_down(cr, cc)
+				if @game.is_finished?
+					keep_playing = 2
+				end
+			when Handler.LEFT_ARROW
+				@game.move_left(cr, cc)
+			when Handler.RIGHT_ARROW
+				@game.move_right(cr, cc)
+			when Handler.DEL
+				keep_playing = 0
+			end
+		end
+
+		if keep_playing == 2
+			system("tput cup 0 0")
+			system("stty -echo")
+			system("tput civis")
+			if @banner_show
+				show_won
+			end
+			Handler.read_char
+		end
+
+		system("tput cnorm")
+		system("stty echo")
+		print `printf '\033c'`
+	end
+
+	private
+	def load_configs
+		colors = [ "lr", "light_red", "lg", "light_green", "ly", "light_yellow", "lb", "light_blue", "lp", "light_purple", "lc", "light_cyan", "lw", "light_white" ]
+		if File.file?('.mazecfg')
+			cfgs = File.readlines('.mazecfg').join(",").gsub(",", "").split("\n")
+			cfgs.each do |cfg|
+				cfg.gsub!(" ", "")
+				if cfg.start_with?("char=")
+					char = cfg.split('=')[1]
+					@game.set_char("#{char}")
+				elsif cfg.start_with?("chr_color=")
+					color = cfg.split('=')[1]
+					if colors.include?(color)
+						@game.set_char_color(color)
+					else
+						@game.set_char_color("default")
+					end
+				elsif cfg.start_with?("mz_color=")
+					mzcolor = cfg.split('=')[1]
+					if colors.include?(mzcolor)
+						@mz_color = mzcolor
+					else
+						@mz_color = "default"
+					end
+				elsif cfg.start_with?("mz_solid")
+					mzsolid = cfg.split('=')[1]
+					if mzsolid == "true"
+						@mz_solid = true
+					else
+						@mz_solid = false
+					end
+				elsif cfg.start_with?("fl_color=")
+					flcolor = cfg.split('=')[1]
+					if colors.include?(flcolor)
+						@flag_color = flcolor
+					else
+						@flag_color = "default"
+					end
+				elsif cfg.start_with?("path_color=")
+					pcolor = cfg.split('=')[1]
+					if colors.include?(pcolor)
+						@game.set_path_color(pcolor)
+					else
+						@game.set_path_color("default")
+					end
+				elsif cfg.start_with?("show_path")
+					showp = cfg.split('=')[1]
+					if showp == "true"
+						@game.set_show_path(true)
+					else
+						@game.set_show_path(false)
+					end
+				elsif cfg.start_with?("portals")
+					portal = cfg.split('=')[1]
+					if portal == "true"
+						load('./portal.rb')
+						@portal_instance = Portal.new(@maze, rand(3..8), @game.get_cr, @game.get_cc)
+						@portals = true
+						@game.set_portals(true)
+						@game.set_portal_instance(@portal_instance)
+					else
+						@portals = false
+						@game.set_portals(false)
+						@game.set_portal_instance(nil)
+					end
+				elsif cfg.start_with?("banner=")
+					banner_bool = cfg.split('=')[1]
+					if banner_bool == "true"
+						@banner_show = true
+					else
+						@banner_show = false
+					end
+				end
+			end
+		end
+	end
+
+	def output_maze
+		for i in 0..@maze.length - 1 do
+			for j in 0..@maze[i].length - 1 do
+				c = @maze[i][j]
+				if c == ':' || c == '#'
+					if @flag_color == "default"
+						print c
+					elsif @flag_color == "lg" || @flag_color == "light_green"
+						print "\e[1;32m#{c}\e[0m"
+					elsif @flag_color == "lr" || @flag_color == "light_red"
+						print "\e[1;31m#{c}\e[0m"
+					elsif @flag_color == "ly" || @flag_color == "light_yellow"
+						print "\e[1;33m#{c}\e[0m"
+					elsif @flag_color == "lb" || @flag_color == "light_blue"
+						print "\e[1;34m#{c}\e[0m"
+					elsif @flag_color == "lp" || @flag_color == "light_purple"
+						print "\e[1;35m#{c}\e[0m"
+					elsif @flag_color == "lc" || @flag_color == "light_cyan"
+						print "\e[1;36m#{c}\e[0m"
+					elsif @flag_color == "lw" || @flag_color == "light_white"
+						print "\e[1;37m#{c}\e[0m"
+					end
+				else
+					if @mz_color == "default"
+						if @mz_solid
+							c = set_wall_char(i, j)
+							if @maze[i][j] == " "
+								c = " "
+							end
+						end
+						print c
+					elsif @mz_color == "lg" || @mz_color == "light_green"
+						if @mz_solid
+							c = set_wall_char(i, j)
+							if @maze[i][j] == " "
+								c = " "
+							end
+						end
+						print "\e[1;32m#{c}\e[0m"
+					elsif @mz_color == "lr" || @mz_color == "light_red"
+						if @mz_solid
+							c = set_wall_char(i, j)
+							if @maze[i][j] == " "
+								c = " "
+							end
+						end
+						print "\e[1;31m#{c}\e[0m"
+					elsif @mz_color == "ly" || @mz_color == "light_yellow"
+						if @mz_solid
+							c = set_wall_char(i, j)
+							if @maze[i][j] == " "
+								c = " "
+							end
+						end
+						print "\e[1;33m#{c}\e[0m"
+					elsif @mz_color == "lb" || @mz_color == "light_blue"
+						if @mz_solid
+							c = set_wall_char(i, j)
+							if @maze[i][j] == " "
+								c = " "
+							end
+						end
+						print "\e[1;34m#{c}\e[0m"
+					elsif @mz_color == "lp" || @mz_color == "light_purple"
+						if @mz_solid
+							c = set_wall_char(i, j)
+							if @maze[i][j] == " "
+								c = " "
+							end
+						end
+						print "\e[1;35m#{c}\e[0m"
+					elsif @mz_color == "lc" || @mz_color == "light_cyan"
+						if @mz_solid
+							c = set_wall_char(i, j)
+							if @maze[i][j] == " "
+								c = " "
+							end
+						end
+						print "\e[1;36m#{c}\e[0m"
+					elsif @mz_color == "lw" || @mz_color == "light_white"
+						if @mz_solid
+							c = set_wall_char(i, j)
+							if @maze[i][j] == " "
+								c = " "
+							end
+						end
+						print "\e[1;37m#{c}\e[0m"
+					end
+				end
+			end
+			puts
+		end
+
+		if @portals
+			@portal_instance.show_portals
+		end
+	end
+	
+	def set_wall_char(r, c)
+		drp = r + 1
+		drn = r - 1
+		dcp = c + 1
+		dcn = c - 1
+		
+		wall_left = c > 0 ? @maze[r][dcn] == "-" : false
+		wall_right = c < @maze[r].length - 1 ? @maze[r][dcp] == "-" : false
+		wall_up = r > 0 ? @maze[drn][c] == "|" : false
+		wall_down = r < @maze.length - 1 ? @maze[drp][c] == "|" : false
+
+		cs = wall_left && wall_right && wall_up && wall_down
+		tr = !wall_left && wall_right && wall_up && wall_down
+		tl = wall_left && !wall_right && wall_up && wall_down
+		tu = wall_left && wall_right && wall_up && !wall_down
+		td = wall_left && wall_right && !wall_up && wall_down
+		vl = !wall_left && !wall_right && (wall_up || wall_down)
+		hl = wall_left && wall_right && !wall_up && !wall_down
+		cbr = wall_left && !wall_right && wall_up && !wall_down
+		cbl = !wall_left && wall_right && wall_up && !wall_down
+		ctr = wall_left && !wall_right && !wall_up && wall_down
+		ctl = !wall_left && wall_right && !wall_up && wall_down
+
+		tlc = r == 0 && c == 0
+		trc = r == 0 && c == @maze[r].length - 1
+		blc = r == @maze.length - 1 && c == 0
+		brc = r == @maze.length - 1 && c == @maze[r].length - 1
+
+		if tlc 
+			return UTF8.TOP_LEFT_CORNER
+		elsif blc 
+			return UTF8.BOTTOM_LEFT_CORNER
+		elsif trc
+			return UTF8.TOP_RIGHT_CORNER
+		elsif brc
+			return UTF8.BOTTOM_RIGHT_CORNER
+		elsif r == 0 && wall_down
+			return UTF8.T_DOWN
+		elsif r == 0 && !wall_down
+			return UTF8.HORI_WALL
+		elsif c == 0 && wall_right
+			return UTF8.T_RIGHT
+		elsif c == 0 && !wall_right
+			return UTF8.VERT_WALL
+		elsif r == @maze.length - 1 && wall_up
+			return UTF8.T_UP
+		elsif r == @maze.length - 1 && !wall_up
+			return UTF8.HORI_WALL
+		elsif c == @maze[r].length - 1 && wall_left
+			return UTF8.T_LEFT
+		elsif c == @maze[r].length - 1 && !wall_left
+			return UTF8.VERT_WALL
+		elsif cs
+			return UTF8.CROSS
+		elsif tr
+			return UTF8.T_RIGHT
+		elsif tl
+			return UTF8.T_LEFT
+		elsif tu
+			return UTF8.T_UP
+		elsif td
+			return UTF8.T_DOWN
+		elsif vl
+			return UTF8.VERT_WALL
+		elsif hl
+			return UTF8.HORI_WALL
+		elsif cbr
+			return UTF8.BOTTOM_RIGHT_CORNER
+		elsif cbl
+			return UTF8.BOTTOM_LEFT_CORNER
+		elsif ctr
+			return UTF8.TOP_RIGHT_CORNER
+		elsif ctl
+			return UTF8.TOP_LEFT_CORNER
+		elsif @maze[r][c] == "+" && (wall_right || wall_left)
+			return UTF8.HORI_WALL
+		elsif @maze[r][c] == "+" && (wall_up || wall_down)
+			return UTF8.VERT_WALL
+		elsif @maze[r][c] == "|"
+			return UTF8.VERT_WALL
+		elsif @maze[r][c] == "-"
+			return UTF8.HORI_WALL
+		else
+			return @maze[r][c]
+		end
+	end
+	
+	def full?
+		has_empty = false
+		for r in 0..@banner.length - 1 do
+			for c in 0..@banner[r].length - 1 do
+				if @banner[r][c] != '~'
+					has_empty = true
+				end
+			end
+		end
+
+		if has_empty
+			return false
+		else
+			return true
+		end
+	end
+
+	def valid_pos?(r, c)
+		if @banner[r][c] == '~'
+			return false
+		else
+			return true
+		end
+	end
+
+	def show_won
+		lines = `tput lines`.to_i / 2
+		cols = `tput cols`.to_i / 2
+
+		start_x = cols - (@banner[0].length / 2) - 2
+		start_y = lines - (@banner.length / 2)
+
+		height = @banner.length - 1
+		width = @banner[0].length - 1
+		
+		while !full? do
+			r = rand(0..height)
+			c = rand(0..width)
+			if valid_pos?(r, c)
+				system("tput cup #{r + start_y} #{c + start_x}")
+				if @banner[r][c] == "#"
+					print "\e[1;30m#{@banner[r][c]}\e[0m"
+					@banner[r][c] = '~'
+				elsif @banner[r][c] != "~"
+					print "\e[1;31m#{@banner[r][c]}\e[0m"
+					@banner[r][c] = '~'
+				end
+			end
+		end
+	end
+end
+
+class Main
+
+	def initialize
+		is_done = 0
+		while is_done == 0
+			option = show_menu
+			if option == "help"
+				show_help
+			elsif option == "start"
+				configs = ARGV[0]
+				instance = nil
+				if configs == "--no-config"
+					instance = Runner.new(false)
+				else
+					instance = Runner.new(true)
+				end
+				instance.start
+			elsif option == "exit"
+				is_done = 1
+				system("stty echo")
+				system("tput cnorm")
+				print `printf '\033c'`
+			end
+		end
+	end
+
+	private
+
+	def show_help
+		system("stty -echo")
+		system("tput civis")
+		print `printf '\033c'`
+		system( <<-EOF
+		pager <<EOH
+A-MAZE-R Help
+
+In Game:
+
+	Movement:		Arrow keys
+	Quit:			q
+
+Config File: 
+	File name:		.mazecf
+
+	Variables:
+
+		char			set character
+
+		chr_color		set character color
+
+		mz_color		set maze color
+
+		mz_solid		set true or false
+		
+		fl_color		set start/end flag color
+
+		show_path		set true or false
+
+		path_color		set path color
+
+	Available Colors:
+
+		lr | light_red
+		lg | light_green
+		ly | light_yellow
+		lb | light_blue
+		lp | light_purple
+		lc | light_cyan
+		lw | light_white
+		default
+
+Example config file:
+
+	char=@
+	chr_color=lg
+	mz_color=lw
+	show_path=false
+	path_color=default
+EOH
+		EOF
+		)
+	end
+		
+	def show_menu
+
+		icon = [
+			["+", "-", "-", "-", "+", "-", "-", "-", "+", "-", "-", "-", "+", " ", " ", " ", "+", "-", "-", "-", "+"],
+			["|", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "|", " ", " ", " ", "|"],
+			["+", " ", " ", " ", "+", "-", "-", "-", "+", "-", "-", "-", "+", "-", "-", "-", "+", " ", " ", " ", "+"],
+			["|", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "|", " ", " ", " ", " ", " ", " ", " ", "|"],
+			["+", "-", "-", "-", "+", "-", "-", "-", "+", " ", " ", " ", "+", " ", " ", " ", "+", " ", " ", " ", "+"],
+			["|", " ", " ", " ", "|", " ", " ", " ", " ", " ", " ", " ", "|", " ", " ", " ", "|", " ", " ", " ", "|"],
+			["+", " ", " ", " ", "+", " ", " ", " ", "+", "-", "-", "-", "+", "-", "-", "-", "+", " ", " ", " ", "+"],
+			["|", " ", " ", " ", "|", " ", " ", " ", "|", " ", " ", " ", " ", " ", " ", " ", "|", " ", " ", " ", "|"],
+			["+", " ", " ", " ", "+", " ", " ", " ", "+", " ", " ", " ", "+", " ", " ", " ", "+", " ", " ", " ", "+"],
+			["|", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "|", " ", " ", " ", " ", " ", " ", " ", "|"],
+			["+", "-", "-", "-", "+", " ", " ", " ", "+", "-", "-", "-", "+", "-", "-", "-", "+", "-", "-", "-", "+"]
+		]
+		print `printf '\033c'`
+
+		tl_cols = `tput cols`.to_i / 2
+
+		icon_cols = icon[0].length
+		icon_mid = icon_cols / 2
+
+		icon_x = tl_cols - icon_mid
+		icon_dx = icon_x
+		icon_y = 0
+		lines = (`tput lines`.to_i / 2) - 2
+		if icon.length + 6 <= `tput lines`.to_i
+			for r in 0..icon.length - 1 do
+				for c in 0..icon[r].length - 1 do
+					system("tput cup #{icon_y} #{icon_dx}")
+					print("\e[1;37m#{icon[r][c]}\e[0m")
+					icon_dx += 1
+				end
+				icon_dx = icon_x
+				icon_y += 1
+				puts
+			end
+
+			lines = icon_y + 1
+		end
+		
+		sel = "\u25B6".encode("UTF-8")
+
+		title = "A-MAZE-R"
+		cols = `tput cols`.to_i / 2
+
+		start = cols - (title.length / 2)
+		i_start_x = start + 2
+		i_start_y = lines + 2
+
+		system("stty -echo")
+		system("tput civis")
+		system("tput cup #{lines} #{start}")
+		print("\e[1;31m#{title}\e[0m")
+
+		system("tput cup #{i_start_y} #{i_start_x}")
+		system("tput bold")
+		print("Start")
+		system("tput sgr0")
+		system("tput cup #{i_start_y+1} #{i_start_x}")
+		system("tput bold")
+		print("Help")
+		system("tput sgr0")
+		system("tput cup #{i_start_y+2} #{i_start_x}")
+		system("tput bold")
+		print("Exit")
+		system("tput sgr0")
+
+		c_i_x = i_start_x - 2
+		c_i_y = i_start_y
+
+		cpos = c_i_y
+		pos_track = 1
+
+		system("tput cup #{c_i_y} #{c_i_x}")
+		print(sel)
+
+		md = true
+		while md do
+			ch = Handler.read_char
+			case ch
+			when Handler.DOWN_ARROW
+				system("tput cup #{cpos} #{c_i_x}")
+				system("tput ech 1")
+				cpos += 1
+				pos_track += 1
+				if pos_track > 3
+					cpos = c_i_y
+					pos_track = 1
+				end
+				system("tput cup #{cpos} #{c_i_x}")
+				print(sel)
+			when Handler.UP_ARROW
+				system("tput cup #{cpos} #{c_i_x}")
+				system("tput ech 1")
+				cpos -= 1
+				pos_track -= 1
+				if pos_track < 1
+					cpos = c_i_y + 2
+					pos_track = 3
+				end
+				system("tput cup #{cpos} #{c_i_x}")
+				print(sel)
+			when Handler.RIGHT_ARROW
+				md = false
+			end
+		end
+
+		if pos_track == 1
+			return "start"
+		elsif pos_track == 2
+			return "help"
+		elsif pos_track == 3
+			return "exit"
+		end
+	end
+end
+
+def add_cfg(cfg)
+	var = cfg.split('=')[0]
+	if File.readlines(".mazecfg").grep(var).size == 0
+		File.open(".mazecfg", "a") { |f| f.puts cfg }
+	end
+end
+
+if !ARGV.empty?
+	system("cp .mazecfg .mazecfg.org")
+	system("sed -i 's/ = /=/g' .mazecfg")
+	system("sed -i 's/ =/=/g' .mazecfg")
+	system("sed -i 's/= /=/g' .mazecfg")
+	text = File.read(".mazecfg")
+	ARGV.each do |a|
+		nc = ""
+		if a == "--no-portals" || a == "-P"
+			add_cfg("portals=false")
+			nc = text.gsub(/portals=true/, "portals=false")
+		elsif a == "--portals" || a == "-p"
+			add_cfg("portals=true")
+			nc = text.gsub(/portals=false/, "portals=true")
+		elsif a == "--no-solid" || a == "-S"
+			add_cfg("mz_solid=false")
+			nc = text.gsub(/mz_solid=true/, "mz_solid=false")
+		elsif a == "solid" || a == "-s"
+			add_cfg("mz_solid=true")
+			nc = text.gsub(/mz_solid=false/, "mz_solid=true")
+		elsif a == "--no-path" || a == "-T"
+			add_cfg("show_path=false")
+			nc = text.gsub(/show_path=true/, "show_path=false")
+		elsif a == "--path" || a == "-t"
+			add_cfg("show_path=true")
+			nc = text.gsub(/show_path=false/, "show_path=true")
+		else
+			puts "Unknown flag #{a}. Aborting."
+			exit
+		end
+		if nc != ""
+			File.open(".mazecfg", "w") { |f| f.puts nc }
+		end
+	end
+end
+
+at_exit {
+	if File.file?(".mazecfg.org")
+		system("mv .mazecfg.org .mazecfg")
+	end
+}
+
+Main.new
