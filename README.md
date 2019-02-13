@@ -1,6 +1,6 @@
 # Amazer
 
-This is a little terminal based maze game written in Ruby
+This is a little terminal based maze game written in Ruby that I made for no reason
 
 ## Getting Started
 ```
