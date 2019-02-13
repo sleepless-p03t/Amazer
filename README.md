@@ -73,7 +73,7 @@ This only affects output
 
 ### Inspiration
 
-[I found a maze generator on rosettacode.org](https://rosettacode.org/wiki/Maze_generation#Ruby) and built a game around it
+I found a maze generator on [rosettacode.org](https://rosettacode.org/wiki/Maze_generation#Ruby) and built a game around it
 
 I tweaked the code slightly, primarily by having it output to an array rather than to the screen
 
