@@ -67,8 +67,9 @@ Use Left, Right, Up, and Down to move arround the maze
 If you get stuck, press q to return to the main menu
 
 ### Bugs
+Command line flags are not being fully parsed
 
-There is only one bug that I am presently aware of: sometimes the Arrow key value is output
+There is only one in-game bug that I am presently aware of: sometimes the Arrow key value is output
 This only affects output
 
 ### Inspiration
