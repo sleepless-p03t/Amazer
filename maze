@@ -508,7 +508,7 @@ class Runner
 				elsif cfg.start_with?("portals")
 					portal = cfg.split('=')[1]
 					if portal == "true"
-						load('./portal.rb')
+						load('./portals.rb')
 						@portal_instance = Portal.new(@maze, rand(3..8), @game.get_cr, @game.get_cc)
 						@portals = true
 						@game.set_portals(true)
